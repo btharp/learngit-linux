@@ -1,0 +1,109 @@
+####安装MySQL8
+1.安装前清理
+　　1.1. 清理原有数据库
+　　　　1.1.1. 清理软件包
+　　　　　　使用 “rpm -pa | grep mysql” 查看原有的软件包和依赖包，将结果使用 “yum remove 包名”逐一删除。
+　　　　1.1.2. 清理配置
+　　　　　　使用“find / -name mysql”查看所有mysql配置，将结果使用“rm -rf 文件名”逐一删除。
+　　1.2. 删除 mariadb 文件
+　　　　由于MySQL在CentOS7中收费了，所以已经不支持MySQL了，取而代之在CentOS7内部集成了mariadb，而安装MySQL的话会和MariaDB的文件冲突，所以需要先卸载掉MariaDB.
+　　　　查看：rpm -qa | grep mariadb
+　　　　可能结果：mariadb-libs-5.5.56-2.el7.x86_64
+　　　　删除：rpm -e mariadb-libs-5.5.56-2.el7.x86_64
+　　　　如果出错，则使用强制删除：rpm -e --nodeps mariadb-libs-5.5.56-2.el7.x86_64
+2. 下载安装包
+　　centos的yum 源中默认是没有mysql的，所以我们需要先去官网下载mysql的repo源并安装；
+　　2.1. 访问官网，查看最新安装包
+　　　　https://dev.mysql.com/downloads/repo/yum/
+　　2.2. 选择版本，点击“download”
+2.3. 登录
+　　　　如果是未登录状态，会要求登录。此时会跳转到 oracle 单点登录页面，登录自己的 oracle 账号即可（没有账号就注册一个，现在下载 oracle 的产品都需要登录，比如 jdk）
+　　2.4. 登录后回到上述页面，右键选择的版本对应的download按钮，点击“复制链接地址菜单项”
+　　2.5. 登录Linux服务器，进入到某个目录（如 /usr/local/src），使用 wget 下载源安装包
+　　　　wget https://dev.mysql.com/get/mysql80-community-release-el7-3.noarch.rpm
+3. 安装mysql源
+　　3.1. 安装 yum repo 文件
+　　　　rpm -ivh mysql80-community-release-el7-3.noarch.rpm
+　　　　执行结果会在/etc/yum.repos.d/目录下生成两个repo文件mysql-community.repo mysql-community-source.repo
+　　　　　　
+　　3.2. 更新yum缓存
+　　　　yum clean all
+       yum makecache
+
+4. 安装mysql服务器
+　　4.1. 选择版本
+　　　　当我们在使用yum安装mysql时，yum默认会从yum仓库中安装mysql最新的GA版本；如何选择自己的版本；
+　　　　4.1.1. 查看mysql yum仓库中mysql版本，使用如下命令
+　　　　　　yum repolist all | grep mysql
+        可以看到mysql8是可用的，其它是禁用的，我正好是需要安装mysql8，所以不用管了。如果想要安装其它版本可以修改
+　　　　4.1.2. 修改禁用启用规则
+　　　　　　yum-config-manager --enable mysql57-community
+　　　　　　如果命令无效，可以直接编辑 mysql repo
+    4.2. 安装mysql服务
+    　　　　yum install mysql-community-server
+    　　　　中间有需要确认的步骤就一直 “y” 就行了。
+5. 启动服务，测试连接
+　　启动：systemctl start mysqld.service
+　　停止：systemctl stop mysqld.service
+　　重启：systemctl restart mysqld.service
+　　查看服务状态：systemctl status mysqld.service
+6. 修改初始密码
+　　6.1. 查看初始密码
+　　　　mysql在安装后会创建一个root@locahost账户，并且把初始的密码放到了/var/log/mysqld.log文件中；
+　　　　查看：cat /var/log/mysqld.log
+初始登录密码只能用于登录mysql，不能进行其它操作。会强制要求用户修改密码。
+　　6.2. 修改初始密码
+　　　　使用初始密码登录：mysql -uroot -p
+　　　　如果不修改，则任何操作时会提示如下错误：
+　　　　　　You must reset your password using ALTER USER statement before executing this statement.
+　　　　修改方式是登录后使用以下语句
+　　　　　　ALTER USER USER() IDENTIFIED BY '新密码'
+　　　　值得注意的是，新密码必须符合安全策略（就是足够复杂，mysql8的默认安全策略级别是 中等，像123456这些肯定是过不了的），否则会提示如下错误：
+　　　　　　ERROR 1819 (HY000): Your password does not satisfy the current policy requirements
+　　　　修改成功之后我们可以看一下mysql服务器的密码安全策略等级：SHOW VARIABLES LIKE 'validate_password%'，结果如下：
+7. 允许远程登录
+　　mysql8安装完成之后，root用户只允许本地登录远程登录会报错：
+　　　　ERROR 1130 (HY000): Host '120.79.172.133' is not allowed to connect to this MySQL server
+　　放开远程权限的方法是登录之后，执行
+　　　　use mysql;
+　　　　update user set host = '%' where user = 'root';
+　　　　flush privileges;
+8. 修改密码加密方式
+　　经过 7. 之后，发现远程还是不能登录，但是报错有所不同了：
+　　　　Authentication plugin 'caching_sha2_password' cannot be loaded: /usr/lib64/mysql/plugin/caching_sha2_password.so: cannot open shared object file: No such file or directory
+　　这是因为mysql7之后，默认的密码加密方式更改了，但是你使用的客户端没有升级，不支持此种加密方式，解决方法是更改服务器加密方式为传统加密方式或者升级客户端。如果是新项目建议使用第二种，毕竟新的肯定更好。如果是存量项目的数据库迁移或者升级，考虑到兼容问题和稳定性，建议使用第一种。
+　　修改加密方式为本地登录之后执行：
+　　　　ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '新密码';
+　　至此，mysql服务已经可以使用了。
+9. 修改默认服务端口
+　　mysql默认端口号是 3306。一般线上数据库，出于安全考虑，都会修改默认端口号。
+　　9.1. 编辑“/etc/my.cnf”文件
+　　　　vi /etc/my.cnf
+　　9.2. 添加行
+　　　　port=新端口；
+　　9.3. 重启mysql服务
+　　　　systemctl restart mysqld.service
+ 
+
+####安装anaconda3  
+安装包网址：https://repo.continuum.io/archive/index.html  约六七百M，另有轻量级的minianaconda，小于100M
+不用选最新的，可能无法安装
+用bash安装的话，要选.sh结尾的安装包
+1. 下载安装包到/usr/src
+    cd /usr/src
+    wget https://repo.continuum.io/archive/Anaconda3-2019.03-Linux-x86_64.sh
+2. 安装
+    bash Anaconda3-2019.03-Linux-x86_64.sh
+    一路回车和yes
+3. 完成后激活配置
+    source ~/.bashrc
+
+
+
+###安装opencv-python
+1. conda install opencv-python
+    导入会出现错误，ImportError: libSM.so.6: cannot open shared object file: No such file or dir
+2. 修复上述错误
+    yum install libSM-1.2.2-2.el7.x86_64
+    yum install libXrender
+    yum install libXext
